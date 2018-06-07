@@ -2,6 +2,8 @@
 
 import argparse
 from typing import List, Any
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.utils import Bunch
 
 
 class PeptideScores:
@@ -30,27 +32,43 @@ class PeptideScores:
     def add_names(self, feature_names, target_names):
         self.feature_names = feature_names
         self.target_names  = target_names
+        pass
 
     def add_observation(self, observation, target):
         self.observations.append(observation)
         self.target.append(target)
         pass
 
+    def get_bunch(self):
+        return Bunch(data          = self.observations,
+                     target        = self.target,
+                     target_names  = self.target_names,
+                     feature_names = self.feature_names)
 def main():
-    #parse arguments
-    print("Starting parser")
-    #parser = argparse.ArgumentParser(description="Random Epitope Binding Predictor")
-    #parser.add_argument('input', metavar='in-file', help='path to the input file', required=False, default='data\projekt_training.txt')
-    #parser.add_argument('output', metavar='out-file', help='path to save the output file to', required=False, default='output.txt')
-    #args = parser.parse_args()
+    print("Parsing arguments...")
+    # Parse argumente
+    parser = argparse.ArgumentParser(description="Random Epitope Binding Predictor")
+    parser.add_argument('--train', metavar='training-file', help='path to the file to train from', required=False)
+    parser.add_argument('--input', metavar='in-file', help='path to the input file', required=False)
+    parser.add_argument('--output', metavar='out-file', help='path to save the output file to', required=False)
+    args = parser.parse_args()
+    # Verwende default path der input file
+    if (args.train == None):
+        args.train = "data\\project_training.txt"
+    # Verwende default path der input file
+    if (args.input == None):
+        args.input = "data\\test_input.txt"
+    # Verwende default path der input file
+    if (args.output == None):
+        args.output = "out\\output.txt"
 
-    #generiere instanz der Peptid sammlung
+    # lade instanzen der benötigten klassen
     pepscore = PeptideScores()
-
+    classifier = KNeighborsClassifier(n_neighbors=1)
     #parse die text file
-    print("Parsing file from ", "data\project_training.txt")#args.input)
+    print("Parsing file from ", args.train)
     try:
-        file = open("data\project_training.txt", "r", encoding='utf8')
+        file = open(args.train, "r")
         pepscore.parse(file.readlines())
         file.close()
     except FileNotFoundError:
@@ -63,5 +81,10 @@ def main():
     print("Target names: ", pepscore.target_names)
     print("Observations: ", pepscore.observations)
     print("Targets: ", pepscore.target)
+
+    # Train the model
+    #classifier.fit(pepscore.observations,pepscore.target)
+    #classifier.predict()
+    return 0
 
 if __name__ == '__main__': main()
