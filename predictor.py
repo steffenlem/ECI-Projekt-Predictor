@@ -1,78 +1,57 @@
 #!/usr/bin/env python
 
 import argparse
-from typing import List, Any
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.utils import Bunch
-from sklearn import tree
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
+from typing import List, Any, Union
+
 import numpy as np
-import pandas
-import itertools
-import aminoAcidEncoding as encode
+from scipy.constants import alpha
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import SGDRegressor
+
+import PeptideScores as Ps
 
 
+def evaluate_result(result: List[int], targets: np.ndarray, target_labels: List[str]):
+    tp = fp = tn = fn = 0.0
+    for i in range(len(result)):
+        if result[i] == targets[i]:
+            if result[i] == 1:
+                tp += 1
+            else:
+                tn += 1
+        else:
+            print("Wrong prediction for {}: true class {}, predicted class {}".format(
+                target_labels[i], targets[i], result[i])
+            )
+            if result[i] == 1:
+                fp += 1
+            else:
+                fn += 1
 
-class PeptideScores(object):
-    feature_names = []
-    observations = []
-    target_names = []
-    target = []
+    acc = (tp + tn) / (tp + tn + fp + fn)
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (fp + tn)
 
-    def parse(self, string : List[str]):
-        # Nimm die erste Spalte als tabellen header
-        # 1. Peptid sequenz, 2. IC50 score, 3. targets
-        header_tab_sep = string.pop(0).replace("\n","").split("\t")
-        # speicher in die Peptid klasse
-        self.add_names([header_tab_sep[0], header_tab_sep[1]], header_tab_sep[2])
-        # lese jede line und splitte sie wie oben
-        for line in string:
-            line_tab_sep = line.replace("\n","").split("\t")
-            # Nimm die Spalten als datenpunkt in der peptide class auf
-            # 1. Peptid sequenz, 2. IC50 score, 3. targets
-            self.add_observation([line_tab_sep[0],line_tab_sep[1]], line_tab_sep[2])
-        pass
-
-    def get_target_name(self):
-        return self.target_names
-
-    def add_names(self, feature_names, target_names):
-        self.feature_names = feature_names
-        self.target_names  = target_names
-        pass
-
-    def add_observation(self, observation, target):
-        self.observations.append(observation)
-        self.target.append(target)
-        pass
-
-    def get_bunch(self):
-        return Bunch(data          = self.observations,
-                     target        = self.target,
-                     target_names  = self.target_names,
-                     feature_names = self.feature_names)
-
-#Determines a random test/train set for a given ratio
-#Parameters
-#   data            array of data
-#   classificaton   array of claffifications
-#   test_ratio
-#
-#Returns
-#
-
-def split_train_test(data, classification, test_ratio):
-    shuffled_indices = np.random.permutation(len(data))
-    test_set_size = int(len(data) * test_ratio)
-    test_indices = shuffled_indices[:test_set_size]
-    train_indices = shuffled_indices[test_set_size:]
-    return [data[i] for i in train_indices], [classification[i] for i in train_indices], [data[i] for i in test_indices], [classification[i] for i in test_indices]
+    # Output result
+    print(
+        "Result:\nTP: {}\tTN: {}\nFP: {}\tFN: {}\nAccuracy: {:.3%}\tSensitivity: {:.3%}\tSpecifity: {:.3%}".format(
+            tp, tn, fp, fn, acc, sensitivity, specificity
+        ))
+    pass
 
 
-
+def sum_2d_list_columns(list_2d: List[List[int]]) -> List[int]:
+    b: List[int] = []
+    for i in range(len(list_2d[0])):
+        b.append(0)
+        for j in range(len(list_2d)):
+            b[-1] = b[-1] + 1 if (list_2d[j][i] == 1) else -1
+        b[-1] = 1 if (b[-1] / len(list_2d) >= 0.5) else 0
+    return b
 
 
 def main():
@@ -83,146 +62,100 @@ def main():
     parser.add_argument('--input', metavar='in-file', help='path to the input file', required=False)
     parser.add_argument('--output', metavar='out-file', help='path to save the output file to', required=False)
     args = parser.parse_args()
-    # Verwende default path der input file
-    if (args.train == None):
+    # Default path of input file
+    if args.train is None:
         args.train = "data\\project_training.txt"
-    # Verwende default path der input file
-    if (args.input == None):
-        args.input = "data\\test_input.txt"
-    # Verwende default path der input file
-    if (args.output == None):
-        args.output = "out\\output.txt"
 
-    # lade instanzen der benötigten klassen
-    pepscore = PeptideScores()
-    classifier = KNeighborsClassifier(n_neighbors=1)
-    #parse die text file
-    print("Parsing file from ", args.train)
+    # Parse Training data in to PeptidScoring objekt
+    training_set = Ps.PeptideScores()
+    print("Parsing training file from ", args.train)
     try:
         file = open(args.train, "r")
-        pepscore.parse(file.readlines())
+        training_set.parse(file.readlines())
         file.close()
     except FileNotFoundError:
-        print("Could not find File")
-    except:
+        print("Could not find training file")
+        return 1
+    except EOFError:
         print("Unexpected error")
+        return 2
 
-    print("Found:")
-    print("Feature names: ", pepscore.feature_names)
-    print("Target names: ", pepscore.target_names)
-    print("Observations: ", pepscore.observations)
-    print("Targets: ", pepscore.target)
+    data_set_number = 3
+    training_set_observations = np.array([])
+    training_set_targets = np.array([])
+    testing_set_observations = np.array([])
+    testing_set_targets = np.array([])
+    testing_set_observation_peptides = []
 
-    #remove ic50 and split sequence
-    splitted_training_data = []
-    for x in pepscore.observations:
-        splitted_training_data.append(list(x[0]))
+    # Parse input file
+    if args.input is not None:
+        testing_set = Ps.PeptideScores()
+        print("Parsing training file from ", args.input)
+        try:
+            file = open(args.input, "r")
+            testing_set.parse(file.readlines())
+        except FileNotFoundError:
+            print("Could not find input file")
 
-    #transform to 20 bit endcoding
-    encoded_20bit_data = encode.twentybit(splitted_training_data)
+        training_set_observations = training_set.get_data(data_set_number)
+        training_set_targets = training_set.get_targets()
+        testing_set_observations = testing_set.get_data(data_set_number)
+        testing_set_targets = testing_set.get_targets()
+        testing_set_observation_peptides = testing_set.get_peptides()
+    else:
+        # Split the test and training data when no input file is given
+        split = int(len(training_set.observations) * 1.0 / 10)
+        split_train_sets = training_set.shuffle_and_split([0, split, -1], shuffle=True)
 
-    #transform to blomap
-    encoded_blomap_data = encode.blomapCode(splitted_training_data)
+        training_set_observations = split_train_sets[1].get_data(data_set_number)
+        training_set_targets = split_train_sets[1].get_targets()
+        testing_set_observations = split_train_sets[0].get_data(data_set_number)
+        testing_set_targets = split_train_sets[0].get_targets()
+        testing_set_observation_peptides = split_train_sets[0].get_peptides()
 
+    print("Using Data:\n",
+          training_set_observations, "\n",
+          training_set_targets, "\n",
+          testing_set_observation_peptides, "\n",
+          testing_set_observations, "\n",
+          testing_set_targets)
+    # Scale the training data and test data to the training data
+    standard_scaler = StandardScaler()
+    standard_scaler.fit(training_set_observations)
+    training_set_observations = standard_scaler.transform(training_set_observations)
+    testing_set_observations = standard_scaler.transform(testing_set_observations)
 
-    #split train/test
-    train_set, train_set_target, test_set, test_set_target = split_train_test(encoded_blomap_data, pepscore.target,0.4)
-
-    #print(train_set)
-    #print(train_set_target)
-
-    #transfrom data to numpy array
-    train_set = np.array(train_set)
-    train_set_target = np.array(train_set_target)
-    test_set = np.array(test_set)
-    test_set_target = np.array(test_set_target)
-
+    print(len(training_set_observations), " elements in the training set,", len(testing_set_observations),
+          "in the testing set")
+    # Train the model
+    classifiers = [
+        RandomForestClassifier(bootstrap=False, max_depth=10, max_features='sqrt', n_estimators=80),
+        MLPClassifier(alpha=0.1, hidden_layer_sizes=(500, 250, 125, 25), activation='logistic', max_iter=500),
+        MLPClassifier(alpha=0.001, hidden_layer_sizes=(1000, 700, 350, 175, 25), activation='relu', max_iter=500)
+    ]
 
     # Train the model
-    #clf = tree.DecisionTreeClassifier()
-    #clf = MLPClassifier(solver='lbfgs', alpha=0.001,hidden_layer_sizes = (180, 100), random_state= 1, activation='relu')
-    clf = RandomForestClassifier(bootstrap= False, max_depth= 10,max_features= 'sqrt',n_estimators = 80)
-    scores = cross_val_score(clf, np.array(encoded_blomap_data), np.array(pepscore.target),cv=5)
+    result: List[List[int]] = []
+    for ci in range(len(classifiers)):
+        print("Training and evaluating Classifier", ci)
+        # train classifier
+        classifiers[ci].fit(training_set_observations, training_set_targets)
 
-    print(scores)
-    print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+        # cross validate
+        scores = cross_val_score(classifiers[ci], testing_set_observations, testing_set_targets, cv=2)
 
+        print(scores)
+        print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
 
+        # classifier.predict()
+        result.append(classifiers[ci].predict(testing_set_observations))
 
-    ##Grid Search
-    # param_grid = [
-    #     {'solver': ['lbfgs'], 'alpha': [0.01, 0.001, 0.0001, 0.00001], 'activation': ['relu','logistic', 'tanh', 'identity'], 'random_state': [1], 'hidden_layer_sizes':[20,25,30,35,40]},
-    #     #{'solver': ['lbfgs'], 'alpha': [0.01, 0.001, 0.0001, 0.00001], 'activation': ['relu'], 'random_state': [1], 'hidden_layer_sizes':[x for x in itertools.product((40,60,120,100,140,80),repeat=2)]}
-    #     #{'bootstrap': [True, False], 'max_depth': [10, 30, 50, 70, None],'max_features': ['auto', 'sqrt'],'n_estimators': [10,20,40,80,160,200,300]}
-    #     #,'min_samples_leaf': [1, 2, 4],'min_samples_split': [2, 5, 10]
-    #     #{'solver': ['adam', 'sgd'], 'alpha': [0.001, 0.0001, 0.00001, 0.000001],'learning_rate': ["constant", "invscaling", "adaptive"], max_iter=1000,}
-    # ]
-    #
-    #
-    #
-    # grid_search = GridSearchCV(MLPClassifier(), param_grid, cv=5, scoring='accuracy')
-    #
-    # grid_search.fit(np.array(encoded_20bit_data), np.array(pepscore.target))
-    #
-    # print(" ")
-    # print("Best Parameter:")
-    # print(grid_search.best_params_)
-    # cvres = grid_search.cv_results_
-    #
-    # print("")
-    # print("Top 10 combinations (unordered):")
-    # for mean_test_score, std_test_score, rank_test_score, params in zip(cvres["mean_test_score"], cvres["std_test_score"], cvres["rank_test_score"],cvres["params"]):
-    #    if(rank_test_score in range(1,10)):
-    #        print(mean_test_score, std_test_score, params)
+        # evaluation
+        evaluate_result(result[ci], testing_set_targets, testing_set_observation_peptides)
 
-
-    #Train/Test Split Part auskommentiert
-    """
-    clf = clf.fit(train_set, train_set_target)
-    
-    #classifier.predict()
-    result = clf.predict(test_set)
-
-    #evaluation
-    tp = fp = tn = fn = 0
-    for i in range(len(result)):
-        if ((result[i] == test_set_target[i]) and (test_set_target[i] == '1')):
-            tp += 1
-        elif ((result[i] != test_set_target[i]) and (test_set_target[i] == '1')):
-            fn += 1
-        elif ((result[i] == test_set_target[i]) and (test_set_target[i] == '0')):
-            tn += 1
-        elif ((result[i] != test_set_target[i]) and (test_set_target[i] == '0')):
-            fp += 1
-
-
-
-
-
-
-    acc = (tp + tn) / (tp + tn + fp + fn)
-    sensitivity = tp / (tp + fn)
-    specificity = tn / (fp + tn)
-
-
-
-    #Output result
-    print()
-    print("TP: " + str(tp))
-    print("TN: " + str(tn))
-    print("FP: " + str(fp))
-    print("FN: " + str(fn))
-    print("Accuracy: " + str(acc))
-    """
+    print("Evaluation Total:")
+    evaluate_result(sum_2d_list_columns(result), testing_set_targets, testing_set_observation_peptides)
     return 0
-
-
-
-
-
-
-
-
 
 
 if __name__ == '__main__': main()
