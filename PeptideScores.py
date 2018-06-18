@@ -90,7 +90,7 @@ class PeptideScores(object):
         """
         return np.array([x.blosum for x in self.observations])
 
-    def get_mixed_set(self) -> np.array:
+    def get_20bit_blomap_mixed_set(self) -> np.array:
         """
         returns both blomap and bit encoding in one array
         :return:
@@ -102,6 +102,27 @@ class PeptideScores(object):
             a.extend(self.observations[i].blo_map)
             observation_mix.append(a)
         return observation_mix
+
+    def get_mixed_set(self, tbit: bool = True, blomap : bool = True, blosum : bool = True) -> np.array:
+        """
+        returns a mixed set with the selected features
+        :type tbit: bool
+        :type blomap: bool
+        :type blosum: bool
+        :return:
+        """
+        # [x.blo_map.extend([1.0 if y else 0.0 for y in x.bit_code]) for x in self.observations]
+        observation_mix : List[List[float]] = []
+        for i in range(len(self.observations)):
+            observation_list : List[float] = []
+            if tbit:
+                observation_list.extend([1.0 if y else 0.0 for y in self.observations[i].bit_code])
+            if blomap:
+                observation_list.extend(self.observations[i].blo_map)
+            if blosum:
+                observation_list.extend(self.observations[i].blosum)
+            observation_mix.append(observation_list)
+        return np.array(observation_mix)
 
     def get_targets(self) -> np.array:
         """
@@ -120,8 +141,11 @@ class PeptideScores(object):
             0:self.get_peptides(),
             1:self.get_bit_code(),
             2:self.get_blo_map(),
-            3:self.get_mixed_set(),
-            4:self.get_blosum()
+            3:self.get_mixed_set(True,True,False),
+            4:self.get_mixed_set(True,False,True),
+            5:self.get_mixed_set(False,True,True),
+            6:self.get_mixed_set(True,True,True),
+            7:self.get_blosum()
         }.get(set_number,self.get_peptides())
 
     def add_observation(self,

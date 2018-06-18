@@ -15,7 +15,7 @@ from sklearn.linear_model import SGDRegressor
 import PeptideScores as Ps
 
 
-def evaluate_result(result: List[int], targets: np.ndarray, target_labels: List[str]):
+def evaluate_result(result: List[int], targets: np.ndarray, target_labels: List[str], probability: List[float] = None):
     tp = fp = tn = fn = 0.0
     for i in range(len(result)):
         if result[i] == targets[i]:
@@ -24,8 +24,8 @@ def evaluate_result(result: List[int], targets: np.ndarray, target_labels: List[
             else:
                 tn += 1
         else:
-            print("Wrong prediction for {}: true class {}, predicted class {}".format(
-                target_labels[i], targets[i], result[i])
+            print("Wrong prediction for {}: true class {}, predicted class {}, Probability {:.5%}".format(
+                target_labels[i], targets[i], result[i], 0.0 if probability is None else probability[i][result[i]])
             )
             if result[i] == 1:
                 fp += 1
@@ -44,13 +44,23 @@ def evaluate_result(result: List[int], targets: np.ndarray, target_labels: List[
     pass
 
 
-def sum_2d_list_columns(list_2d: List[List[int]]) -> List[int]:
+def mean_2d_list_columns(list_2d: List[List[int]]) -> List[int]:
     b: List[int] = []
     for i in range(len(list_2d[0])):
         b.append(0)
         for j in range(len(list_2d)):
-            b[-1] = b[-1] + 1 if (list_2d[j][i] == 1) else -1
-        b[-1] = 1 if (b[-1] / len(list_2d) >= 0.5) else 0
+            b[-1] = b[-1] + list_2d[j][i]
+        b[-1] = 1 if (b[-1] / len(list_2d)) >= 0.5 else 0
+    return b
+
+
+def meaner_2d_list_columns(list_2d: List[List[float]]) -> List[float]:
+    b: List[float] = []
+    for i in range(len(list_2d[0])):
+        b.append(0)
+        for j in range(len(list_2d)):
+            b[-1] = b[-1] + list_2d[j][i]
+        b[-1] = b[-1] / len(list_2d)
     return b
 
 
@@ -80,7 +90,7 @@ def main():
         print("Unexpected error")
         return 2
 
-    data_set_number = 3
+    data_set_number = 6
     training_set_observations = np.array([])
     training_set_targets = np.array([])
     testing_set_observations = np.array([])
@@ -130,12 +140,13 @@ def main():
     # Train the model
     classifiers = [
         RandomForestClassifier(bootstrap=False, max_depth=10, max_features='sqrt', n_estimators=80),
-        MLPClassifier(alpha=0.1, hidden_layer_sizes=(500, 250, 125, 25), activation='logistic', max_iter=500),
-        MLPClassifier(alpha=0.001, hidden_layer_sizes=(1000, 700, 350, 175, 25), activation='relu', max_iter=500)
+        MLPClassifier(hidden_layer_sizes=(50,9), activation='logistic', max_iter=1000),
+        MLPClassifier(hidden_layer_sizes=(50,9), activation='relu', max_iter=1000)
     ]
 
     # Train the model
     result: List[List[int]] = []
+    probability : List[List[float]] = []
     for ci in range(len(classifiers)):
         print("Training and evaluating Classifier", ci)
         # train classifier
@@ -149,12 +160,16 @@ def main():
 
         # classifier.predict()
         result.append(classifiers[ci].predict(testing_set_observations))
+        probability.append(classifiers[ci].predict_proba(testing_set_observations))
 
         # evaluation
-        evaluate_result(result[ci], testing_set_targets, testing_set_observation_peptides)
+        evaluate_result(result[ci], testing_set_targets, testing_set_observation_peptides, probability[ci])
 
-    print("Evaluation Total:")
-    evaluate_result(sum_2d_list_columns(result), testing_set_targets, testing_set_observation_peptides)
+    print("Evaluation Total Average:")
+    evaluate_result(mean_2d_list_columns(result),
+                    testing_set_targets,
+                    testing_set_observation_peptides,
+                    meaner_2d_list_columns(probability))
     return 0
 
 
